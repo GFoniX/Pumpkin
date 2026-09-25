@@ -1,5 +1,6 @@
+use crate::wit::utils::manual_java_packets;
 use heck::{ToPascalCase, ToSnakeCase};
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 use syn::{Attribute, Fields, Item};
 
 pub fn build_java_mapping() -> String {
@@ -602,10 +603,18 @@ fn parse_packet_file(
 ) {
     let content = fs::read_to_string(path).expect("Failed to read file");
     let file = syn::parse_file(&content).expect("Failed to parse file");
+    let manual_packets = if attr_name == "java_packet" && state == "play" {
+        manual_java_packets(&file)
+    } else {
+        HashSet::new()
+    };
 
     for item in file.items {
         match item {
-            Item::Struct(s) if has_attr(&s.attrs, attr_name) => {
+            Item::Struct(s)
+                if has_attr(&s.attrs, attr_name)
+                    || manual_packets.contains(&s.ident.to_string()) =>
+            {
                 if s.ident == "CHandshake" {
                     continue;
                 }

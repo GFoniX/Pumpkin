@@ -1,4 +1,4 @@
-use crate::wit::utils::map_type_with_defined;
+use crate::wit::utils::{manual_java_packets, map_type_with_defined};
 use heck::ToKebabCase;
 use semver::Version;
 use std::collections::HashSet;
@@ -97,9 +97,17 @@ fn collect_defined_types(dirs: &[(String, &str)]) -> HashSet<String> {
                 if let Ok(content) = fs::read_to_string(&path)
                     && let Ok(file) = syn::parse_file(&content)
                 {
+                    let manual_packets = if *state == "play" {
+                        manual_java_packets(&file)
+                    } else {
+                        HashSet::new()
+                    };
                     for item in file.items {
                         match item {
-                            Item::Struct(s) if has_java_packet_attr(&s.attrs) => {
+                            Item::Struct(s)
+                                if has_java_packet_attr(&s.attrs)
+                                    || manual_packets.contains(&s.ident.to_string()) =>
+                            {
                                 defined.insert(wit_name(s.ident.to_string(), state));
                             }
                             Item::Enum(e) if has_java_packet_attr(&e.attrs) => {
@@ -185,10 +193,18 @@ fn parse_packet_file(
 ) {
     let content = fs::read_to_string(path).expect("Failed to read file");
     let file = syn::parse_file(&content).expect("Failed to parse file");
+    let manual_packets = if state == "play" {
+        manual_java_packets(&file)
+    } else {
+        HashSet::new()
+    };
 
     for item in file.items {
         match item {
-            Item::Struct(s) if has_java_packet_attr(&s.attrs) => {
+            Item::Struct(s)
+                if has_java_packet_attr(&s.attrs)
+                    || manual_packets.contains(&s.ident.to_string()) =>
+            {
                 process_struct(s, state, interface, variant, defined_cases, defined_types);
             }
             Item::Enum(e) if has_java_packet_attr(&e.attrs) => {

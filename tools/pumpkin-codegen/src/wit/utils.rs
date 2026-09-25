@@ -1,6 +1,6 @@
 use heck::ToKebabCase;
 use std::collections::HashSet;
-use syn::{GenericArgument, PathArguments, Type, TypePath};
+use syn::{GenericArgument, Item, PathArguments, Type, TypePath};
 use wit_encoder::Type as WitType;
 
 pub fn map_type(ty: &Type) -> WitType {
@@ -166,5 +166,53 @@ pub fn map_type_with_defined(ty: &Type, defined_types: Option<&HashSet<String>>)
         Type::Paren(tp) => map_type_with_defined(&tp.elem, defined_types),
         Type::Group(tg) => map_type_with_defined(&tg.elem, defined_types),
         _ => WitType::String,
+    }
+}
+
+/// Names of the structs in `file` that implement `MultiVersionJavaPacket` by hand instead of
+/// through `#[java_packet]`, usually because their packet id changes between versions. Only
+/// play-state packets use this, so login and configuration stay limited to annotated packets.
+#[must_use]
+pub fn manual_java_packets(file: &syn::File) -> HashSet<String> {
+    file.items
+        .iter()
+        .filter_map(|item| {
+            let Item::Impl(implementation) = item else {
+                return None;
+            };
+            let (trait_path, _) = implementation.trait_.as_ref()?;
+            if trait_path.segments.last()?.ident != "MultiVersionJavaPacket" {
+                return None;
+            }
+            let Type::Path(self_type) = implementation.self_ty.as_ref() else {
+                return None;
+            };
+            Some(self_type.path.segments.last()?.ident.to_string())
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manual_java_packets;
+
+    #[test]
+    fn finds_structs_with_a_hand_written_multi_version_id() {
+        let file = syn::parse_file(
+            r"
+            #[java_packet(ANIMATE)]
+            pub struct CEntityAnimation { pub entity_id: VarInt }
+            pub struct CSwingArm { pub entity_id: VarInt }
+            impl crate::packet::MultiVersionJavaPacket for CSwingArm {
+                fn to_id(version: JavaMinecraftVersion) -> i32 { 0 }
+            }
+            impl CSwingArm {}
+            impl Other for CEntityAnimation {}
+            ",
+        )
+        .unwrap();
+        let found = manual_java_packets(&file);
+        assert_eq!(found.len(), 1);
+        assert!(found.contains("CSwingArm"));
     }
 }
